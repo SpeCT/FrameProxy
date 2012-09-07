@@ -101,6 +101,9 @@ SOFTWARE.
 			for (var prop in obj) {
 				if (typeof obj[prop] != 'function') {
 					if (typeof obj[prop] == 'object') {
+                    if (obj[prop] === null) {
+                        res[prop] = null;
+                    }else if (typeof obj[prop] == 'object') {
 						res[prop] = frameproxy.stripFunctions(obj[prop]);
 					}else {
 						res[prop] = obj[prop];
