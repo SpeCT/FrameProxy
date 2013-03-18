@@ -1,4 +1,5 @@
 /*
+Copyright (c) 2013 Yury Proshchenko (github.com/SpeCT)
 Copyright (c) 2011 Benjamin Eidelman <@beneidel>
 
 MIT License
@@ -23,26 +24,26 @@ SOFTWARE.
 */
 /*
  	-- FrameProxy --
- 	 
+
  Requirements:
- 	- jQuery 1.5+     
+ 	- jQuery 1.5+
  */
 
 (function($){
 
     var frameproxy = {};
-    
+
     var count = 0;
-    
+
     frameproxy.functions = [
 			"jQuery.ajax",
 			"jQuery.get",
 			"jQuery.post",
 			"jQuery.getJSON"
     ];
-    
+
     frameproxy.global = window || global;
-    
+
     frameproxy.ppath = function(root, expr, value){
 		if (typeof root == 'string') {
 			value = expr;
@@ -53,7 +54,7 @@ SOFTWARE.
 			}
 		}
 		var parts = expr.split('.'), cur = root;
-		
+
 		if (typeof value == 'undefined') {
 			// get value
 			for (var pi = 0; pi < parts.length - 1; pi++) {
@@ -90,7 +91,7 @@ SOFTWARE.
 					if (typeof obj[i] == 'function') {
 						res[i] = null;
 					}
-					else 
+					else
 						if (typeof obj[i] == 'object') {
 							res[i] = frameproxy.stripFunctions(obj[i]);
 						}
@@ -100,7 +101,6 @@ SOFTWARE.
 			}
 			for (var prop in obj) {
 				if (typeof obj[prop] != 'function') {
-					if (typeof obj[prop] == 'object') {
                     if (obj[prop] === null) {
                         res[prop] = null;
                     }else if (typeof obj[prop] == 'object') {
@@ -113,16 +113,38 @@ SOFTWARE.
         }
         return res;
     }
-    
+
     frameproxy.message = {
         pack: function(msg, options){
+            if (msg.args) for (var i=0; i<msg.args.length; ++i) {
+                var xhr = msg.args[i]
+                if (xhr.getResponseHeader) xhr.getResponseHeader = { // Emulate most used headers
+                    "Content-Type": xhr.getResponseHeader("Content-Type"),
+                    "content-type": xhr.getResponseHeader("content-type"),
+                    "Last-Modified": xhr.getResponseHeader("Last-Modified"),
+                    "Etag": xhr.getResponseHeader("Etag"),
+                    "SET-COOKIE": xhr.getResponseHeader("SET-COOKIE"),
+                    "X-Couch-Update-NewRev": xhr.getResponseHeader("X-Couch-Update-NewRev")
+
+                }
+            }
             return frameproxy.stripFunctions(msg);
         },
         unpack: function(msg, options){
+            if (msg.args) for (var i=0; i<msg.args.length; ++i) {
+                var xhr = msg.args[i],
+                    dump = xhr && xhr.getResponseHeader
+                if (dump)
+                    xhr.getResponseHeader = (function(dump){ return function(header) { // Emulate most used headers
+                        if (dump[header] === undefined)
+                            console.warn("FrameProxy: Missed header. Dig into frameproxy.js for details.", header)
+                        return dump[header]
+                    }})(dump);
+            }
             return msg;
         }
     }
-    
+
     /**
      * Creates a new ProxyClient
      * @param {String|DOMWindow} target an url to a proxy client page (to open in a hidden iframe), or a DOMWindow to post messages to
@@ -135,11 +157,11 @@ SOFTWARE.
             throw 'jQuery is required';
         }
         else {
-        
+
             this.password = password;
             this.deferreds = {};
             this.proxyWindow = null;
-            
+
             if (typeof target == 'object' && typeof target.postMessage == 'function') {
                 // use already loaded window
                 this.proxyWindow = target;
@@ -155,7 +177,7 @@ SOFTWARE.
                 this.iframe = document.createElement('iframe');
                 this.iframe.src = target;
                 this.iframe.style.display = 'none';
-                
+
                 // insert iframe
                 (function(iframe, proxy){
                     jQuery(function(){
@@ -168,54 +190,66 @@ SOFTWARE.
                     });
                 })(this.iframe, this);
             }
-                        
+
             // listen proxy responses
             (function(proxy){
                 window.addEventListener("message", function(e){
-                
+
                     if (e.source !== proxy.proxyWindow) {
                         return;
                     }
-                    
-                    var id, deferred;
+
+                    var id, deferred, args = [];
                     try {
-                    
+
                         var data = frameproxy.message.unpack(e.data);
-                        
+
                         if (data.id && (deferred = proxy.deferreds[data.id])) {
                             if (data.error) {
+                                args = data.args
                                 deferred.reject.apply(deferred, data.args);
                             }
                             else {
                                 if (typeof data.result != 'undefined') {
+                                    console.warn("FrameProxy: Missed jqhr argument", data)
+                                    args = [data.result]
                                     deferred.resolve.apply(deferred, [data.result]);
                                 }
                                 else {
+                                    args = data.args.slice().reverse();
                                     deferred.resolve.apply(deferred, data.args);
                                 }
                             }
                         }
-                    } 
+                    }
                     catch (err) {
-                        if (!deferred.isRejected()) {
+                        if (deferred.isRejected && !deferred.isRejected()) {
                             deferred.reject(err);
                         }
+                        console.error("Error cought by frameproxy", err, err.stack);
+                        throw err
                     }
                     finally {
                         if (id) {
                             delete proxy.deferreds[id];
+                        }
+                        if (deferred.ajaxComplete) {
+                            deferred.ajaxComplete.apply(deferred, args);
                         }
                     }
                 });
             })(this);
         }
     };
-    
+
     frameproxy.ProxyClient.prototype.remote = function(expr, args){
-            
+
         count++;
         var id = '_' + count, deferred = this.deferreds[id] = jQuery.Deferred();
-        
+        ajaxOpts = args[0]
+        if (ajaxOpts.success || ajaxOpts.error)
+            console.warn('Missed $.ajax callbacks', ajaxOpts)
+        deferred.ajaxComplete = ajaxOpts.complete
         var msg = frameproxy.message.pack({
             id: id,
             expr: expr,
@@ -224,32 +258,40 @@ SOFTWARE.
         if (this.password) {
             msg.password = this.password;
         }
-        
+
         this.proxyWindow.postMessage(msg, '*');
-        
+
+        promise = deferred.promise();
+        promise.success = promise.success || promise.done;
+        promise.error = promise.error || promise.fail;
+        promise.complete = function(cb) {
+            this.done(cb); // TODO: reverse arguments
+            this.fail(cb);
+        };
+
         return deferred.promise();
-        
+
     };
-	
+
 	frameproxy.ProxyClient.prototype.ready = function(handler){
 		$(this).bind('ready', handler);
 		return this;
 	}
-	    
+
     frameproxy.ProxyClient.prototype.wrapAll = function(){
 		var args = Array.prototype.slice.apply(arguments);
 		args.push.apply(args, frameproxy.functions);
 		return this.wrap.apply(this,args);
     };
-    
+
 	frameproxy.ProxyClient.prototype.wrap = function(replace){
-    
+
         var makeRemote = function(proxy, expr){
             return function(){
                 return proxy.remote(expr, Array.prototype.slice.apply(arguments));
             };
         };
-        var repl = (replace === true);		
+        var repl = (replace === true);
         for (var i =0; i< arguments.length; i++) {
         	var expr = arguments[i];
 			if (typeof expr == 'string') {
@@ -259,7 +301,7 @@ SOFTWARE.
 				if (repl) {
 					var e = frameproxy.ppath(expr);
 					if (e.obj) {
-							// replace local by remote 
+							// replace local by remote
 							e.obj[e.name] = rmt;
 					}
 				}
@@ -267,21 +309,21 @@ SOFTWARE.
         }
         return this;
     };
-    
-	
+
+
     frameproxy.ProxyServer = function ProxyServer(options){
-    
+
         if (!window.postMessage) {
             throw 'window.postMessage not supported on this browser';
         }
         if (typeof jQuery == 'undefined') {
             throw 'jQuery is required';
         }
-        
+
         this.options = jQuery.extend(true, {}, frameproxy.ProxyServer.options, options);
-        
+
     };
-    
+
     frameproxy.ProxyServer.options = {
         // a domain string, regex, filter function, or '*' for any
         domain: document ? (document.location.protocol + '//' + document.location.host) : 'http://localhost',
@@ -292,14 +334,14 @@ SOFTWARE.
 		// expressions/functions allowed (string, regex, or functions)
 		expressions: Array.prototype.slice.apply(frameproxy.functions)
     };
-    
+
     frameproxy.ProxyServer.prototype.listen = function(){
-    
+
 		var stringIsAllowed = function(str, filters){
 			if (!filters){
 				return true;
 			}
-			var f = (filters instanceof Array ? filters: [filters]);  
+			var f = (filters instanceof Array ? filters: [filters]);
 			for (var i =0; i< f.length; i++){
 				var filter = f[i];
 				if (filter === '*'){
@@ -319,15 +361,15 @@ SOFTWARE.
 			}
 			return false;
 		};
-	
+
         (function(options){
             window.addEventListener("message", function(e){
-            
+
                 var id = -1;
                 try {
-                
+
                     var data = frameproxy.message.unpack(e.data);
-                    
+
                     if (options.password) {
                         if (e.data.password !== options.password) {
                             throw 'request rejected: invalid password';
@@ -336,25 +378,28 @@ SOFTWARE.
 					if (!stringIsAllowed(e.domain, options.domain)){
                         throw 'request rejected: invalid domain "' + e.domain + '"';
 					}
-					if (!stringIsAllowed(e.uri, options.uri)){
-                        throw 'request rejected: invalid domain "' + e.domain + '"';
-					}
-                                        
+                    if (!stringIsAllowed(e.uri, options.uri)){
+                        throw 'request rejected: invalid uri "' + e.uri + '"';
+                    }
+                    if (!stringIsAllowed(e.origin, options.origin)){
+                        throw 'request rejected: invalid origin "' + e.origin + '"';
+                    }
+
                     if (typeof data.id == 'undefined') {
                         throw 'no id specified';
-                    }                                        
+                    }
                     if (!data.expr) {
                         throw 'no expr specified';
                     }
-					
+
                     var valid = false, id = data.id;
-                    
+
 					if (!stringIsAllowed(data.expr, options.expressions)){
                         throw 'request rejected: invalid expr "' + data.expr + '"';
 					}
-                                        
+
 					var result;
-					
+
 					var p = frameproxy.ppath(data.expr);
                     if (p.obj) {
 						if (typeof p.value == 'function') {
@@ -363,9 +408,9 @@ SOFTWARE.
 							result = p.value;
 						}
                     }
-                    
+
                     if (result && typeof result.then == 'function') {
-                    
+
                         var done = function(id){
                             return function(){
                                 // done
@@ -398,7 +443,7 @@ SOFTWARE.
                         });
                         e.source.postMessage(msg, '*');
                     }
-                } 
+                }
                 catch (err) {
                     console.error('error processing remote call: ' + err);
                     var msg = frameproxy.message.pack({
@@ -408,26 +453,26 @@ SOFTWARE.
                     e.source.postMessage(msg, '*');
                 }
             });
-            
+
         })(this.options);
-        
+
         console.log('frameproxy server listening');
         $(this).trigger('ready');
-		
+
 		return this;
     };
-    		
+
 	frameproxy.ProxyServer.prototype.ready = function(handler){
 		$(this).bind('ready', handler);
 		return this;
 	}
-    
+
     if (typeof window !== 'undefined') {
         window.frameproxy = frameproxy;
     }
-    else 
+    else
         if (typeof exports != 'undefined') {
             exports.frameproxy = frameproxy;
         }
-    
+
 })(jQuery);
