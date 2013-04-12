@@ -1,15 +1,21 @@
 <html>
-	<head>
-		<title>JS Proxy</title>
-		<script src="jquery.min.js"></script>
-		<script src="frameproxy.js"></script>
-	</head>
-	<body>
-		<script type="text/javascript">
-			new frameproxy.ProxyServer({
-				domain: "*",
-				origin: @@origin
-			}).listen();
-		</script>
-	</body>
+  <head>
+    <title>JS Proxy</title>
+    <script src="jquery.min.js"></script>
+    <script src="frameproxy.js"></script>
+  </head>
+  <body>
+    <script type="text/javascript">
+      var withSameRoot = new RegExp("^"
+        + location.protocol.replace(/:/, "\\:\\/\\/") // protocol
+        + ".*"                                        // root host
+        + location.origin.split("://")[1].split(".").reverse().slice(0,2).reverse().join("\\.")
+        + "$");
+
+      new frameproxy.ProxyServer({
+        domain: "*",
+        origin: withSameRoot
+      }).listen();
+    </script>
+  </body>
 </html>
