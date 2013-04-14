@@ -246,7 +246,7 @@ SOFTWARE.
 
         count++;
         var id = '_' + count, deferred = this.deferreds[id] = jQuery.Deferred();
-        ajaxOpts = args[0]
+        var ajaxOpts = args[0]
         if (ajaxOpts.success || ajaxOpts.error)
             console.warn('Missed $.ajax callbacks', ajaxOpts)
         deferred.ajaxComplete = ajaxOpts.complete
@@ -261,7 +261,7 @@ SOFTWARE.
 
         this.proxyWindow.postMessage(msg, '*');
 
-        promise = deferred.promise();
+        var promise = deferred.promise();
         promise.success = promise.success || promise.done;
         promise.error = promise.error || promise.fail;
         promise.complete = function(cb) {
