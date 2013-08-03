@@ -9,7 +9,7 @@
       var withSameRoot = new RegExp("^"
         + location.protocol.replace(/:/, "\\:\\/\\/") // protocol
         + ".*"                                        // root host
-        + location.origin.split("://")[1].split(".").reverse().slice(0,2).reverse().join("\\.")
+        + location.host.split(".").reverse().slice(0,2).reverse().join("\\.")
         + "$");
 
       new frameproxy.ProxyServer({
