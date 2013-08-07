@@ -116,6 +116,7 @@ SOFTWARE.
 
     frameproxy.message = {
         pack: function(msg, options){
+            msg.type = "frameproxy"
             if (msg.args) for (var i=0; i<msg.args.length; ++i) {
                 var xhr = msg.args[i]
                 if (xhr.getResponseHeader) xhr.getResponseHeader = { // Emulate most used headers
@@ -131,13 +132,14 @@ SOFTWARE.
             return frameproxy.stripFunctions(msg);
         },
         unpack: function(msg, options){
+            if (msg.type !== "frameproxy") return;
             if (msg.args) for (var i=0; i<msg.args.length; ++i) {
                 var xhr = msg.args[i],
                     dump = xhr && xhr.getResponseHeader
                 if (dump)
                     xhr.getResponseHeader = (function(dump){ return function(header) { // Emulate most used headers
                         if (dump[header] === undefined)
-                            console.warn("FrameProxy: Missed header. Dig into frameproxy.js for details.", header)
+                            console.error("FrameProxy: Missed header. Dig into frameproxy.js for details.", header)
                         return dump[header]
                     }})(dump);
             }
@@ -204,7 +206,7 @@ SOFTWARE.
 
                         var data = frameproxy.message.unpack(e.data);
 
-                        if (data.id && (deferred = proxy.deferreds[data.id])) {
+                        if (data && data.id && (deferred = proxy.deferreds[data.id])) {
                             if (data.error) {
                                 args = data.args
                                 deferred.reject.apply(deferred, data.args);
@@ -223,7 +225,7 @@ SOFTWARE.
                         }
                     }
                     catch (err) {
-                        if (deferred.isRejected && !deferred.isRejected()) {
+                        if (deferred && deferred.isRejected && !deferred.isRejected()) {
                             deferred.reject(err);
                         }
                         console.error("Error cought by frameproxy", err, err.stack);
@@ -233,7 +235,7 @@ SOFTWARE.
                         if (id) {
                             delete proxy.deferreds[id];
                         }
-                        if (deferred.ajaxComplete) {
+                        if (deferred && deferred.ajaxComplete) {
                             deferred.ajaxComplete.apply(deferred, args);
                         }
                     }
@@ -369,6 +371,7 @@ SOFTWARE.
                 try {
 
                     var data = frameproxy.message.unpack(e.data);
+                    if (!data) return;
 
                     if (options.password) {
                         if (e.data.password !== options.password) {
